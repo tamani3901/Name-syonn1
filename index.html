@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>3Dドットアニメ 自由入力版</title>
+<style>
+  body {
+    background: #000;
+    color: white;
+    font-family: sans-serif;
+    text-align: center;
+    margin: 0; padding: 10px;
+  }
+  canvas {
+    background: #111;
+    border: 1px solid #444;
+    display: block;
+    margin: 10px auto;
+  }
+  .controls {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    font-size: 14px;
+    user-select: none;
+  }
+  input[type=number], input[type=range] {
+    width: 60px;
+    text-align: center;
+  }
+  input[type=range] {
+    width: 150px;
+  }
+</style>
+</head>
+<body>
+<h2>3D風アニメーション作成ツール</h2>
+<input type="file" id="imageInput" multiple accept="image/*" />
+<div class="controls">
+  <label>
+    ドット数（横）
+    <input type="text" id="dotCountX" value="32" />
+  </label>
+  <label>
+    ドット数（縦）
+    <input type="text" id="dotCountY" value="32" />
+  </label>
+    <label>
+    ドットサイズ(px)
+    <input type="text" id="dotSizeRange" value="5" />
+  </label>
+  <label>
+    回転角度(Y軸)
+    <input type="range" id="angleRange" min="0" max="360" value="0" />
+  </label>
+  <label>
+    スピード (fps)
+    <input type="range" id="speedRange" min="1" max="30" value="10" />
+  </label>
+</div>
+<canvas id="canvas" width="500" height="500"></canvas>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const imageInput = document.getElementById('imageInput');
+  const dotCountXInput = document.getElementById('dotCountX');
+  const dotCountYInput = document.getElementById('dotCountY');
+  const dotSizeRange = document.getElementById('dotSizeRange');
+  const angleRange = document.getElementById('angleRange');
+  const speedRange = document.getElementById('speedRange');
+
+  let images = [];
+  let frame = 0;
+  let lastTime = 0;
+  let fps = 10;
+  let dotSize = 10;
+  let angle = 0;
+  let dotCountX = 32;
+  let dotCountY = 32;
+
+  imageInput.addEventListener('change', (e) => {
+    const files = [...e.target.files];
+    images = [];
+    files.forEach((file) => {
+      const img = new Image();
+      img.onload = () => {
+        images.push(img);
+        if (images.length === files.length) {
+          frame = 0;
+          lastTime = performance.now();
+          requestAnimationFrame(draw);
+        }
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  });
+
+  // 自由入力用バリデーション（数字なら反映、空欄・文字はそのまま）
+  function onDotCountInput(inputElem, setter) {
+    const val = inputElem.value.trim();
+    if (/^\d+$/.test(val)) {
+      const num = parseInt(val, 10);
+      if (num >= 1) {
+        setter(num);
+      }
+    }
+  }
+
+  dotCountXInput.addEventListener('input', () => {
+    onDotCountInput(dotCountXInput, v => dotCountX = v);
+  });
+
+  dotCountYInput.addEventListener('input', () => {
+    onDotCountInput(dotCountYInput, v => dotCountY = v);
+  });
+
+  dotSizeRange.addEventListener('input', () => {
+    dotSize = +dotSizeRange.value;
+  });
+
+  angleRange.addEventListener('input', () => {
+    angle = +angleRange.value;
+  });
+
+  speedRange.addEventListener('input', () => {
+    fps = +speedRange.value;
+  });
+
+  function rotateY(x, y, z, rad) {
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+    const nx = x * cosA + z * sinA;
+    const nz = -x * sinA + z * cosA;
+    return { x: nx, y, z: nz };
+  }
+
+  function draw(time = 0) {
+    if (images.length === 0) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'white';
+      ctx.font = '20px sans-serif';
+      ctx.fillText('画像をアップロードしてください', 50, canvas.height / 2);
+      return;
+    }
+
+    if (time - lastTime > 1000 / fps) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const img = images[frame];
+
+      const w = dotCountX >= 1 ? dotCountX : 32;
+      const h = dotCountY >= 1 ? dotCountY : 32;
+
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCanvas.width = w;
+      tempCanvas.height = h;
+      tempCtx.drawImage(img, 0, 0, w, h);
+      const imageData = tempCtx.getImageData(0, 0, w, h).data;
+
+      const rad = (angle * Math.PI) / 180;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      let dots = [];
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          const r = imageData[i], g = imageData[i+1], b = imageData[i+2], a = imageData[i+3];
+          if (a < 128) continue;
+
+          let px = (x - w / 2) * dotSize;
+          let py = (y - h / 2) * dotSize;
+          let pz = 0;
+
+          const rotated = rotateY(px, py, pz, rad);
+
+          const cameraZ = 300;
+          const scale = cameraZ / (cameraZ + rotated.z);
+          const sx = cx + rotated.x * scale;
+          const sy = cy + rotated.y * scale;
+          const size = Math.max(1, dotSize * scale);
+
+          dots.push({ x: sx, y: sy, size, color: `rgb(${r},${g},${b})`, z: rotated.z });
+        }
+      }
+
+      dots.sort((a,b) => a.z - b.z);
+
+      dots.forEach(dot => {
+        ctx.fillStyle = dot.color;
+        ctx.fillRect(dot.x - dot.size / 2, dot.y - dot.size / 2, dot.size, dot.size);
+      });
+
+      frame = (frame + 1) % images.length;
+      lastTime = time;
+    }
+    requestAnimationFrame(draw);
+  }
+</script>
+</body>
+</html>
